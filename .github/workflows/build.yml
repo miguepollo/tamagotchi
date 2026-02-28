@@ -42,6 +42,7 @@ jobs:
           path: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/rpm/*.rpm
+          if-no-files-found: error
 
   build-windows:
     runs-on: windows-latest
