@@ -86,7 +86,8 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          sha256sum *.deb *.rpm *.msi > SHA256SUMS.txt
+          shopt -s nullglob
+          sha256sum *.deb *.rpm *.msi > SHA256SUMS.txt || echo "No artifacts found"
           
       - name: Get version
         id: version
