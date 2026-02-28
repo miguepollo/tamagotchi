@@ -1,0 +1,126 @@
+name: Build & Draft Release
+
+on:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev rpm
+          
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        
+      - name: Build
+        run: pnpm install && pnpm tauri build
+        
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-builds
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        
+      - name: Build
+        run: pnpm install && pnpm tauri build
+        
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-builds
+          path: src-tauri/target/release/bundle/msi/*.msi
+
+  create-draft-release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-builds
+          path: artifacts/
+          
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-builds
+          path: artifacts/
+          
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum *.deb *.rpm *.msi > SHA256SUMS.txt
+          
+      - name: Get version
+        id: version
+        run: echo "VERSION=v0.0.0-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        
+      - name: Delete old draft releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --draft | while read -r line; do
+            tag=$(echo "$line" | awk '{print $1}')
+            if [ -n "$tag" ]; then
+              gh release delete "$tag" --yes || true
+            fi
+          done
+          
+      - name: Create Draft Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          name: "Development Build ${{ steps.version.outputs.VERSION }}"
+          draft: true
+          body: |
+            ## Development Build
+            Commit: ${{ github.sha }}
+            
+            ### Instaladores
+            - Linux: .deb (Debian/Ubuntu) y .rpm (Fedora/RHEL)
+            - Windows: .msi
+            
+            ### Checksums
+            Ver `SHA256SUMS.txt` para verificar integridad.
+          files: |
+            artifacts/*.deb
+            artifacts/*.rpm
+            artifacts/*.msi
+            artifacts/SHA256SUMS.txt
